@@ -1,0 +1,26 @@
+[package]
+name = "sensact"
+version = "0.1.0"
+authors = ["Volker Kempert <volker.kempert@almedso.de>"]
+edition = "2018"
+description = "Actuators and Sensors"
+documentation = "https://docs.rs/sensact"
+homepage = "https://github.com/almedso/sensact"
+keywords = ["measurement", "actuator"]
+categories = ["no-std"]
+license = "MIT"
+repository = "https://github.com/almedso/sensact"
+readme = "README.md"
+
+[dependencies]
+libm = { version = "0.2.0", optional = true }
+
+[dependencies.num-traits]
+version = "0.2"
+default-features = false
+
+features = ["std", "libm"]
+
+[features]
+default = ["std"]
+std = []
