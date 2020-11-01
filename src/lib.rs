@@ -13,7 +13,7 @@
 #[cfg(feature = "std")]
 extern crate std;
 
-#[cfg(feature = "std")]
+// #[cfg(feature = "std")]
 pub mod sensor;
 
 use num_traits::NumOps;
