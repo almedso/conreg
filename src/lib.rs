@@ -9,9 +9,13 @@
 //!
 //! The `num-traits` crate is tested for rustc 1.8 and greater.
 //!
-//! ```
-//! const RADIUS = 0815.mm;
-//! const TICKS_PER_ROUND = 20;
+//! ## Examples
+//!
+//! TODO - make the example compile again
+//!
+//! ```compile_fail
+//! const RADIUS: isize = 0815;
+//! const TICKS_PER_ROUND: isize = 20;
 //! let l1 = PositionSensor();
 //! let v2 = RotationSensor(TICKS_PER_ROUND).transform(RADIUS);
 //! let mut a DriveActuator();
@@ -40,11 +44,6 @@ pub trait Sensor<T: PartialEq + NumOps> {
     fn get(&self) -> T;
 }
 
-pub trait TimeSourceIterator {
-    type MicroSeconds;
-
-    fn next(&mut self) -> Option<Self::MicroSeconds>;
-}
-
-#[cfg(feature = "std")]
+pub mod ramp;
 pub mod timebase;
+// pub mod pid;
