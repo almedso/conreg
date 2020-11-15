@@ -46,4 +46,5 @@ pub trait Sensor<T: PartialEq + NumOps> {
 
 pub mod ramp;
 pub mod timebase;
+pub mod target;
 // pub mod pid;
