@@ -1,6 +1,6 @@
 //! # Target Value Input
 //!
-//! Interators that are intended as target input for controllers
+//! Iterators that are intended as target input for controllers
 //!
 //! ## Constant Target Value
 //!
@@ -8,15 +8,15 @@
 //! use sensact::target::*;
 //!
 //! let mut target = TargetValue(0_isize);
-//! for v in 0..2 { println!("Value is {}", v); }
+//! for _v in 0..2 { println!("Value is {:?}", target.next()); }
 //! target.set(1);
-//! for v in 0..2 { println!("Value is {}", v); }
+//! for _v in 0..2 { println!("Value is {:?}", target.next()); }
 //! ```
 use core::iter::Iterator;
 pub struct TargetValue<T>(pub T);
 
 impl<T: Copy> TargetValue<T> {
-    pub fn set( &mut self, value: T) {
+    pub fn set(&mut self, value: T) {
         self.0 = value;
     }
 }
@@ -25,7 +25,7 @@ impl<T: Copy> Iterator for TargetValue<T> {
     type Item = T;
     /// The iterator never finished and returns zero
     /// and never changes the value underneath
-    fn next(& mut self) -> Option<Self::Item> {
+    fn next(&mut self) -> Option<Self::Item> {
         Some(self.0)
     }
 }
