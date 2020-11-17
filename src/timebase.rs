@@ -43,11 +43,13 @@ pub struct TimeDelta {
     last: usize,
 }
 
-impl TimeDelta {
-    pub fn default() -> Self {
+impl Default for TimeDelta {
+    fn default() -> Self {
         Self::new(now_as_micros, 0)
     }
+}
 
+impl TimeDelta {
     pub fn new(now_fn: fn() -> usize, last: usize) -> Self {
         Self { now_fn, last }
     }
