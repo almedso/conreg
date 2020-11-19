@@ -87,10 +87,10 @@
 ///
 ///
 pub struct PidParameter {
-    proportional: f32,
-    integral: f32,
-    differential: f32,
-    delay: i32, // in micro seconds (for D-T1 portion)
+    pub proportional: f32,
+    pub integral: f32,
+    pub differential: f32,
+    pub delay: i32, // in micro seconds (for D-T1 portion)
 }
 
 /// The PID-T1 controller with flexible sampling rate
