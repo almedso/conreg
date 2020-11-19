@@ -1,5 +1,5 @@
 [package]
-name = "sensact"
+name = "steer-and-control"
 version = "0.1.0"
 authors = ["Volker Kempert <volker.kempert@almedso.de>"]
 edition = "2018"

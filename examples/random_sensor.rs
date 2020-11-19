@@ -1,12 +1,12 @@
 //! Print values of a random sensor
 //!
 
-use sensact::sensor;
-use sensact::Sensor;
+use steer_and_control::sensor::UniformDistributionSensor;
+use steer_and_control::Sensor; // trait must be brought into namespace as well
 
 fn main() {
-    let s = sensor::UniformDistributionSensor::new(2.0, 5.4);
+    let s = UniformDistributionSensor::new(2.0, 5.4);
     println!("Sensor random: {}", s.get());
 
-    println!("Sensor random: {}", sensor::ConstValueSensor::new(2).get());
+    // println!("Sensor random: {}", sensor::ConstValueSensor::new(2).get());
 }
