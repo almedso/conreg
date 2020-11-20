@@ -151,11 +151,15 @@ impl PidController {
                     + FIXED_POINT_CORRECTION * self.sample_interval / parameter.delay,
             ),
             b: (
-                (k_d - k_p * self.sample_interval
+                (
+                    // .0
+                    k_d - k_p * self.sample_interval
                     // danger of overflow
-                    + k_i * self.sample_interval * self.sample_interval)
-                    / parameter.delay,
-                -2 * k_d + k_p * self.sample_interval / parameter.delay,
+                    + k_i * self.sample_interval * self.sample_interval
+                ) / parameter.delay,
+                // .1
+                (-2 * k_d + k_p * self.sample_interval) / parameter.delay,
+                //  .2
                 k_d / parameter.delay,
             ),
             ..self
@@ -187,30 +191,36 @@ mod tests {
     #[test]
     fn init_ok() {
         let p = PidParameter {
-            proportional: 0.5,
+            proportional: 2.0,
             integral: 1.0,
-            differential: 2.0,
-            delay: 1000, // 10 millisec time delay
+            differential: 3.0,
+            delay: 5, // 10 millisec time delay
         };
-        let pid = PidController::new(50); // .05 millisec sample interval
+        let pid = PidController::new(1); // .05 millisec sample interval
         let pid = pid.set(p);
-        assert_eq!(pid.a, (950, -1950));
-        assert_eq!(pid.b, (2477, -3975, 2));
+        assert_eq!(pid.a, (800, -1800));
+        assert_eq!(pid.b, (400, -800, 600));
     }
 
     #[test]
     fn control_ok() {
         let p = PidParameter {
-            proportional: 0.5,
+            proportional: 2.0,
             integral: 1.0,
-            differential: 2.0,
-            delay: 1000, // 10 millisec time delay
+            differential: 3.0,
+            delay: 5, // 0.5 millisec time delay
         };
-        let pid = PidController::new(50); // .05 millisec sample interval
+        let pid = PidController::new(1); // .01 millisec sample interval
         let mut pid = pid.set(p);
         // model the step response input to see the controller in action
         assert_eq!(pid.control((0, 0)), 0);
-        assert_eq!(pid.control((1000, 0)), 2);
-        assert_eq!(pid.control((1000, 0)), -3976);
+        assert_eq!(pid.control((1000, 0)), 600);
+        assert_eq!(pid.control((1000, 0)), -6080);
+        assert_eq!(pid.control((1000, 0)), 4527);
+        assert_eq!(pid.control((1000, 0)), -15818);
+        assert_eq!(pid.control((1000, 0)), 30628);
+        assert_eq!(pid.control((1000, 0)), -75929);
+        assert_eq!(pid.control((1000, 0)), 168330);
+        assert_eq!(pid.control((1000, 0)), -391663);
     }
 }

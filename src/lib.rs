@@ -44,7 +44,8 @@ pub trait Sensor<T: PartialEq + NumOps> {
     fn get(&self) -> T;
 }
 
-pub mod pid;
+pub mod controller;
+
 pub mod ramp;
 pub mod target;
 pub mod timebase;
