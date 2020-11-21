@@ -28,26 +28,25 @@
 //!
 //! ```rust
 //! use std::iter;
-//! use sensact::pid::{PidController, pid}
+//! use steer_and_control::controller::pid::PidController;
+//! use steer_and_control::controller::pid_parameter::{PidParameterAdditive};
 //!
-//! let mut actual = iter::repeat(0); // This is what we measure
+//! let mut actual = iter::repeat(0.0_f32); // This is what we measure
 //! // This composes a step response input as target, i.e. what we want
-//! let mut target_pre = iter::repeat(0).take(10); // 10 samples before step
-//! let mut target_post = iter::repeat(1); // samples after the step
+//! let mut target_pre = iter::repeat(0.0_f32).take(10); // 10 samples before step
+//! let mut target_post = iter::repeat(1.0_f32); // samples after the step
 //! let mut target = target_pre.chain(target_post);
 //!
-//! let p = PidParameter {
-//!     proportional: 0.5,
-//!     integral: 1.0,
-//!     differential: 2.0,
-//!     delay: 1000, // 10 millisec time delay
-//! };
-//! let pid = PidController::new(50); // .05 millisec sample interval
+//! let p = PidParameterAdditive::new(1.0).set_integral(1.0);
+//! let mut pid = PidController::<f32>::new(0.000_01).set(p);
+//! println!("PidController: {:?}", pid);
 //!
 //! let output = actual.zip(target)  // provide input tupel (actual, target)
-//!     .map(|(d, p)| pid.control(d, p)))  // run the controller
+//!     .map(|x| pid.control(x))  // run the controller
 //!     .take(1000)  // Stop processing after 1000 samples
-//!     .plot()  // Plot the step response
+//!     // .plot()  // Plot the step response
+//!     .collect::<Vec<f32>>();
+//! println!("Result {:?}", output);
 //! ```
 //!
 //! ## MCU example

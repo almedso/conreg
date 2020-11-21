@@ -5,7 +5,7 @@
 //! ## Constant Target Value
 //!
 //! ```rust
-//! use sensact::target::*;
+//! use steer_and_control::target::*;
 //!
 //! let mut target = TargetValue(0_isize);
 //! for _v in 0..2 { println!("Value is {:?}", target.next()); }
