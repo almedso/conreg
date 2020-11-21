@@ -52,7 +52,7 @@
 //! ### Example
 //!
 //! ```rust
-//! use steer_and_control::ramp::{Ramp, RampParameter};
+//! use steer_and_control::steerer::ramp::{Ramp, RampParameter};
 //!
 //! const MAX_SPEED: f32 = 3.0;
 //! const MAX_ACCEL: f32 = 2.0;
@@ -77,7 +77,7 @@
 //! ### Example
 //!
 //! ```rust
-//! use steer_and_control::ramp::{Ramp, RampParameter};
+//! use steer_and_control::steerer::ramp::{Ramp, RampParameter};
 //!
 //! const MAX_SPEED: f32 = 3.0;
 //! const MAX_ACCEL: f32 = 2.0;
@@ -211,7 +211,7 @@ impl Ramp {
         let tu = 1.0; // time unit of 1 second
         let a_needed = (self.current.speed - self.temp_speed_target) / tu;
         let mut a_result = a_needed;
-        // check if new acceleration is smaller than max accelerataion
+        // check if new acceleration is smaller than max acceleration
         if a_needed.abs() > self.parameter.max_acceleration {
             a_result = self.parameter.max_acceleration * a_result.signum();
         }
@@ -320,7 +320,6 @@ mod tests {
             },
             None => return false,
         }
-        false
     }
 
     #[test]
