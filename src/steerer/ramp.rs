@@ -1,6 +1,6 @@
 //! # Ramp
 //!
-//! **Ramp** is an input generator for movements.
+//! **Ramp** is an input generator for movement pathes.
 //! Generator indicates that it implements an Iterator trait.
 //!
 //! ## Units of measurement
@@ -52,14 +52,11 @@
 //! ### Example
 //!
 //! ```rust
-//! use steer_and_control::steerer::ramp::{Ramp, RampParameter};
+//! use steer_and_control::steerer::ramp::{Ramp, RampConstraints};
 //!
-//! const MAX_SPEED: f32 = 3.0;
-//! const MAX_ACCEL: f32 = 2.0;
-//! const MAX_JERK: f32 = 1.0;
-//! let rp = RampParameter::new(MAX_SPEED, MAX_ACCEL, MAX_JERK);
+//! let rc: RampConstraints = Default::default().set_speed(1.0);
 //! println!("{:?}", rp);
-//! let mut r = Ramp::new(rp);
+//! let mut r = Ramp::new(0.1, rc);
 //! println!("Current generalized position{:?}", r.get());
 //!
 //! // Position Mode: Stop in a distance of - 10
@@ -79,12 +76,9 @@
 //! ```rust
 //! use steer_and_control::steerer::ramp::{Ramp, RampParameter};
 //!
-//! const MAX_SPEED: f32 = 3.0;
-//! const MAX_ACCEL: f32 = 2.0;
-//! const MAX_JERK: f32 = 1.0;
-//! let rp = RampParameter::new(MAX_SPEED, MAX_ACCEL, MAX_JERK);
+//! let rc: RampConstraints = Default::default().set_acceleration(1.0);
 //! println!("{:?}", rp);
-//! let mut r = Ramp::new(rp);
+//! let mut r = Ramp::new(0.1, rc);
 //! println!("Current generalized position{:?}", r.get());
 //!
 //! // Speed Mode: Accelerate to the speed of 2 and keep moving
@@ -97,28 +91,51 @@
 // TODO allow for move at constant speed
 // TODO test move to position actually stops.
 
-#[derive(Debug)]
-pub struct RampParameter {
-    max_speed: f32,
-    max_acceleration: f32,
-    max_jerk: f32,
+#[derive(Debug, Clone, Copy)]
+pub struct RampConstraints {
+    max_speed: Option<f32>,
+    max_acceleration: Option<f32>,
+    max_jerk: Option<f32>,
 }
 
-impl RampParameter {
-    pub fn new(max_speed: f32, max_acceleration: f32, max_jerk: f32) -> Self {
+impl Default for RampConstraints {
+    /// The default constraints for a ramp are none
+    fn default() -> Self {
         Self {
-            max_speed,
-            max_acceleration,
-            max_jerk,
+            max_speed: None,
+            max_acceleration: None,
+            max_jerk: None,
+        }
+    }
+}
+impl RampConstraints {
+    pub fn max_speed(&self, value: f32) -> Self {
+        Self {
+            max_speed: Some(value),
+            ..*self
+        }
+    }
+
+    pub fn max_acceleration(&self, value: f32) -> Self {
+        Self {
+            max_acceleration: Some(value),
+            ..*self
+        }
+    }
+
+    pub fn max_jerk(&self, value: f32) -> Self {
+        Self {
+            max_jerk: Some(value),
+            ..*self
         }
     }
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct GeneralizedPosition {
-    position: f32,
-    speed: f32,
-    acceleration: f32,
+    pub position: f32,
+    pub speed: f32,
+    pub acceleration: f32,
 }
 
 impl GeneralizedPosition {
@@ -131,22 +148,33 @@ impl GeneralizedPosition {
     }
 }
 
-#[derive(Debug)]
+const MAX_5G: f32 = 9.91 * 5.0; // 5G is the super max acceleration to consider at all
+const MAX_100M_PER_SEC: f32 = 100.0; // 100 m per seconds as super maximum speed
+
+#[derive(Debug, Clone, Copy)]
 pub struct Ramp {
-    parameter: RampParameter,
+    sample_interval: f32, // measured in secods
+    constraints: RampConstraints,
     current: GeneralizedPosition,
     target_distance: Option<f32>,
     target_speed: Option<f32>,
     temp_speed_target: f32, // needed to manage ramp to temp_speed_target
 }
 
-/// The sample intervall is the time in seconds that is used for
-/// between two iterator next calls to recompute the new generalized position
-const SAMPLE_INTERVAL: f32 = 0.001;
 impl Ramp {
-    pub fn new(parameter: RampParameter) -> Self {
+    /// Ramp Constructor
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_interval` - The sample intervall is the time in seconds that is
+    ///    used for between two iterator next calls to recompute the new generalized
+    ///    position
+    /// * `constraints` - Any speed, acceleration or jerk constraints that must
+    ///    be considered for path planning
+    pub fn new(sample_interval: f32, constraints: RampConstraints) -> Self {
         Ramp {
-            parameter,
+            sample_interval,
+            constraints,
             current: Default::default(),
             target_distance: Some(0.0), // do not cause movement as default
             target_speed: None,
@@ -162,11 +190,25 @@ impl Ramp {
         self.target_speed = None;
         // assuming zero speed at the moment? - Is that true
         // calculate ramp end speed w/o const speed part
-        let mut final_speed = (self.parameter.max_acceleration * distance.abs()).sqrt();
-        if final_speed > self.parameter.max_speed {
-            final_speed = self.parameter.max_speed;
+        let mut final_speed = (self.consider_max_acceleration(MAX_5G) * distance.abs()).sqrt();
+        if final_speed > self.consider_max_speed(MAX_100M_PER_SEC) {
+            final_speed = self.consider_max_speed(MAX_100M_PER_SEC);
         }
         self.temp_speed_target = final_speed * distance.signum();
+    }
+
+    /// return either speed input of max_speed (sign corrected)
+    fn consider_max_speed(&self, speed: f32) -> f32 {
+        match self.constraints.max_speed {
+            None => speed,
+            Some(max) => {
+                if speed.abs() > max {
+                    max * speed.signum()
+                } else {
+                    speed
+                }
+            }
+        }
     }
 
     /// Set speed mode
@@ -180,11 +222,7 @@ impl Ramp {
     /// * `speed`: The target speed
     ///    Note: if abs(speed) >  max_speed, target speed gets reduced.
     pub fn set_target_speed(&mut self, speed: f32) {
-        let mut s = speed;
-        if speed.abs() > self.parameter.max_speed {
-            // limit the speed to the maximum possible
-            s = self.parameter.max_speed * speed.signum();
-        }
+        let s = self.consider_max_speed(speed);
         self.target_distance = None;
         self.target_speed = Some(s);
         self.temp_speed_target = s;
@@ -199,33 +237,53 @@ impl Ramp {
         self.current
     }
 
+    // return input acceleration or max acceleration - consider the sign
+    fn consider_max_acceleration(&self, acceleration: f32) -> f32 {
+        match self.constraints.max_acceleration {
+            None => acceleration,
+            Some(max) => {
+                if acceleration.abs() > max {
+                    max * acceleration.signum()
+                } else {
+                    acceleration
+                }
+            }
+        }
+    }
+    // return input jerk or max jerk - consider the sign
+    fn consider_max_jerk(&self, jerk: f32) -> f32 {
+        match self.constraints.max_jerk {
+            None => jerk,
+            Some(max) => {
+                if jerk.abs() > max {
+                    max * jerk.signum()
+                } else {
+                    jerk
+                }
+            }
+        }
+    }
+
     /// Internal function to move to the expected `temp_speed_target`
     ///
     /// # Returns
     ///
     /// * Boolean value that indicates if the speed target is reached
     pub fn move_ramp(&mut self) -> bool {
-        // figure out maximum acceleration change i.e. jerk_result
         // it is guaranteed that temp_speed_target is below max_speed
-        let dt = SAMPLE_INTERVAL;
-        let tu = 1.0; // time unit of 1 second
-        let a_needed = (self.current.speed - self.temp_speed_target) / tu;
-        let mut a_result = a_needed;
-        // check if new acceleration is smaller than max acceleration
-        if a_needed.abs() > self.parameter.max_acceleration {
-            a_result = self.parameter.max_acceleration * a_result.signum();
-        }
-        // check if acceleration smaller is smaller than max allowed jerk
-        let jerk_needed = (self.current.acceleration - a_result) / tu;
-        let mut jerk_result = jerk_needed;
-        if jerk_needed.abs() > self.parameter.max_jerk {
-            jerk_result = self.parameter.max_jerk * jerk_needed.signum();
-        }
 
-        // update the positions
-        self.current.acceleration += jerk_result * dt;
-        self.current.speed += self.current.acceleration * dt;
-        self.current.position += self.current.speed * dt;
+        const TIME_UNIT: f32 = 1.0; // time unit of 1 second - just for readability
+        let a_needed = (self.current.speed - self.temp_speed_target) / TIME_UNIT;
+        let a_result = self.consider_max_acceleration(a_needed);
+
+        // check if acceleration is smaller than max allowed jerk
+        let jerk_needed = (self.current.acceleration - a_result) / TIME_UNIT;
+        let jerk_result = self.consider_max_jerk(jerk_needed);
+
+        // update the generalized position - the sequence matters
+        self.current.acceleration += jerk_result * self.sample_interval;
+        self.current.speed += self.current.acceleration * self.sample_interval;
+        self.current.position += self.current.speed * self.sample_interval;
 
         // return ramp finished?
         self.temp_speed_target == self.current.speed
@@ -248,7 +306,7 @@ impl Ramp {
                     // check if we need to ramp down i.e. set temp_speed_target
                     // to zero
                     let break_distance =
-                        self.current.speed.powf(2.0) / self.parameter.max_acceleration;
+                        self.current.speed.powf(2.0) / self.consider_max_acceleration(MAX_5G);
                     if break_distance >= new_distance {
                         // start breaking by instructing to move_ramp down
                         self.temp_speed_target = 0.0;
