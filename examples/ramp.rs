@@ -17,11 +17,11 @@ fn main() {
     println!("Current generalized position{:?}", rp.get());
 
     let position: Vec<f32> = rp.take(takes).map(|x| x.position).collect::<Vec<f32>>();
-    println!("Positions {:?}", position);
+    println!("Positions    {:?}", position);
 
     let speed: Vec<f32> = rs.take(takes).map(|x| x.speed).collect::<Vec<f32>>();
-    println!("Positions {:?}", speed);
+    println!("Speed        {:?}", speed);
 
     let acceleration: Vec<f32> = ra.take(takes).map(|x| x.acceleration).collect::<Vec<f32>>();
-    println!("Positions {:?}", acceleration);
+    println!("Acceleration {:?}", acceleration);
 }
