@@ -7,8 +7,7 @@ fn main() {
     println!("{:?}", rc);
 
     let mut rp = Ramp::new(0.1, rc);
-    // Position Mode: Stop in a distance of - 10
-    rp.set_target_distance(10.0);
+    rp.set_target_relative_position(10.0);
 
     let rs = rp.clone();
     let ra = rp.clone();
