@@ -88,9 +88,16 @@
 //!  .count();  // Consume the iterator
 //! ```
 
-// TODO allow for move at constant speed
-// TODO test move to position actually stops.
-
+/// Ramp constraints are physical limitation of the item to be moved by a ramp
+/// The constraints are:
+///
+/// * speed limit
+/// * acceleration limit
+/// * jerk limit (deviation of acceleration)
+///
+/// Jerk limits reduces changing force to the item in question and increases
+/// lifetime of the item as well as it prevents spilling in case liquides are
+/// moved in open carriers
 #[derive(Debug, Clone, Copy)]
 pub struct RampConstraints {
     max_speed: Option<f32>,
@@ -140,6 +147,8 @@ impl RampConstraints {
     }
 }
 
+/// One dimensional coordinates that consider position, speed and acceleration
+/// Represents the kinematic state of the item to be moved by a ramp.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct GeneralizedPosition {
     pub position: f32,
@@ -157,6 +166,10 @@ impl GeneralizedPosition {
     }
 }
 
+/// The ramp is defined by sequence of up to 8 steps this function is called
+/// when a step has completed and the next step is due to be the current
+/// Current step is the state at index zero. next is the one at index 1
+/// Steps are represented by RampState data type
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RampState {
     AccelerateTo(f32),             // Target acceleration
@@ -206,6 +219,57 @@ impl Ramp {
         self.state = [RampState::SpeedZero; 8];
     }
 
+    // Internal function that plans
+    //  * path acceleration (a_opt),
+    //  * constant acceleration time (t_accl)
+    //  * and constant speed time (t_v)
+    // under the condition that the prerequisites are met
+    // (speed zero, acceleration zero of current generalized position)
+    fn plan_for_position(&self, delta_position: f32) -> (f32, f32, f32) {
+        let mut d_p = delta_position;
+        let jerk = self.consider_max_jerk(MAX_JERK);
+        // preliminary acceleration determined by distance to move
+        let mut a_opt = (d_p / (12.0 * jerk.powi(2))).cbrt();
+        let a_max = self.consider_max_acceleration(a_opt.signum() * MAX_ACCELERATION);
+        let v_max = self.consider_max_speed(a_opt.signum() * MAX_SPEED);
+        let a_max_by_speed = (v_max * 2.0 * jerk).sqrt();
+
+        // correct a_opt;  compute remaining distance (reduced by jerked acceleration)
+        let a_super_max = if a_max_by_speed > a_max {
+            // reduce max acceleration due to acceleration limit
+            a_max
+        } else {
+            // reduce max acceleration due to speed limit
+            a_max_by_speed
+        };
+        if a_opt.abs() < a_super_max.abs() {
+            // a_opt is now finally determined
+            a_opt = a_super_max * a_opt.signum();
+            d_p -= 4.0 * a_opt.powi(3) / (3.0 * jerk.powi(2));
+        }
+
+        // from here we check how to balance between const acceleration and
+        // const speed movement: input is v_res, a_opt, d_p
+        // a_opt is below  acceleration limits, v_res is below speed limit
+        // we have a distance of d_p go move
+        let t_v: f32;
+        let t_accl: f32;
+        let v_res = a_opt.powi(2) / (2.0 * jerk);
+        // the maximum distance achieved without moving at const speed
+        // i.e. accelerate to speed limit
+        let s_accl_max = (v_max - v_res).powi(2) / a_opt;
+        if s_accl_max > d_p {
+            // no need to move at const speed
+            t_accl = (d_p / a_opt).sqrt();
+            t_v = 0.0;
+        } else {
+            // accelerate up to v_max and move the remaining distance at const speed
+            t_accl = (v_max - v_res) * a_opt;
+            d_p -= a_opt * t_accl.powi(2);
+            t_v = d_p / v_max;
+        }
+        (a_opt, t_accl, t_v)
+    }
     /// Set position mode - perform movement path planning
     ///
     /// Move a certain (signed) distance (relative position) and stop.
@@ -232,57 +296,15 @@ impl Ramp {
     /// # Arguments
     ///
     /// * `delta_position`: The target position equals current position + (signed) delta position.
-    pub fn set_target_position(&mut self, delta_position: f32) {
-        self.reset_path_states();
+    pub fn set_target_relative_position(&mut self, delta_position: f32) {
         if self.current.acceleration != 0.0 || self.current.speed != 0.0 {
             // planning conditions are not given -> go to zero acceleration, zero speed and start over
             // remember current position for later reconsideration
+            self.reset_path_states();
             self.state[0] = RampState::RecomputeToSpeed(0.0);
             self.state[1] = RampState::RecomputeToPosition(self.current.position, delta_position);
-            self.state[2] = RampState::SpeedZero;
         } else {
-            let mut d_p = delta_position;
-            let jerk = self.consider_max_jerk(MAX_JERK);
-            let mut a_opt = (d_p / (12.0 * jerk.powi(2))).cbrt(); // preliminary acceleration determined by distance to move
-            let a_max = self.consider_max_acceleration(a_opt.signum() * MAX_ACCELERATION);
-            let v_max = self.consider_max_speed(a_opt.signum() * MAX_SPEED);
-            let a_max_by_speed = (v_max * 2.0 * jerk).sqrt();
-
-            // correct a_opt;  compute remaining distance (reduced by jerked acceleration)
-            let a_super_max = if a_max_by_speed > a_max {
-                // reduce max acceleration due to acceleration limit
-                a_max
-            } else {
-                // reduce max acceleration due to speed limit
-                a_max_by_speed
-            };
-            if a_opt.abs() < a_super_max.abs() {
-                // a_opt is now finally determined
-                a_opt = a_super_max * a_opt.signum();
-                d_p -= 4.0 * a_opt.powi(3) / (3.0 * jerk.powi(2));
-            }
-
-            // from here we check how to balance between const acceleration and
-            // const speed movement: input is v_res, a_opt, d_p
-            // a_opt is below  acceleration limits, v_res is below speed limit
-            // we have a distance of d_p go move
-            let mut t_v = 0.0;
-            #[allow(unused_mut)]
-            let mut t_accl: f32;
-
-            let v_res = a_opt.powi(2) / (2.0 * jerk);
-            // the maximum distance achieved without moving at const speed
-            // i.e. accelerate to speed limit
-            let s_accl_max = (v_max - v_res).powi(2) / a_opt;
-            if s_accl_max > d_p {
-                // no need to move at const speed
-                t_accl = (d_p / a_opt).sqrt();
-            } else {
-                // accelerate up to v_max and move the remaining distance at const speed
-                t_accl = (v_max - v_res) * a_opt;
-                d_p -= a_opt * t_accl.powi(2);
-                t_v = d_p / v_max;
-            }
+            let (a_opt, t_accl, t_v) = self.plan_for_position(delta_position);
 
             // Compose the state changes according to a_opt, t_accl, t_v
             self.state[0] = RampState::AccelerateTo(a_opt);
@@ -296,6 +318,20 @@ impl Ramp {
         }
     }
 
+    // Plan optimal acceleration (a_optimal) and time to accelerate (t_accl) to reach target speed
+    // Returns (a_optimal, t_accl) tupel
+    fn plan_for_speed(&self, speed: f32) -> (f32, f32) {
+        let jerk = self.consider_max_jerk(MAX_JERK);
+        let a_optimum = (speed * jerk / 4.0).sqrt();
+        let a_max = self.consider_max_acceleration(a_optimum.signum() * MAX_ACCELERATION);
+        if a_optimum.abs() < a_max.abs() {
+            // no need to accelerate at constant acceleration
+            (a_optimum, 0.0)
+        } else {
+            // need to run for a certain time at constant acceleration
+            (a_max, speed / a_max - 4.0 * jerk / a_max)
+        }
+    }
     /// Set speed mode - perform movement path planning
     ///
     ///
@@ -318,36 +354,36 @@ impl Ramp {
     /// * `speed`: The target speed
     ///    Note: if abs(speed) >  max_speed, target speed gets reduced.
     pub fn set_target_speed(&mut self, speed: f32) {
-        // TODO: existing handle recompute states
-        self.reset_path_states();
         if self.current.acceleration != 0.0 {
             // planning conditions are not given -> go to zero acceleration and start over
-            self.state[0] = RampState::AccelerateTo(0.0);
-            self.state[1] = RampState::RecomputeToSpeed(speed);
-            self.state[2] = RampState::SpeedKeep;
+            // keep the remaining step queue intact
+            // push states in reverse order
+            if self.state[0] == RampState::SpeedZero {
+                self.push_state_on_as_current(RampState::SpeedKeep);
+            }
+            self.push_state_on_as_current(RampState::RecomputeToSpeed(speed));
+            self.push_state_on_as_current(RampState::AccelerateTo(0.0));
         } else {
             let speed = self.consider_max_speed(speed);
             if speed == self.current.speed {
-                self.state[0] = RampState::SpeedKeep;
+                if self.state[0] == RampState::SpeedZero {
+                    // in case a RecomputeXX is following
+                    // do not have the intermediate step of keeping the speed
+                    self.push_state_on_as_current(RampState::SpeedKeep);
+                }
             } else {
-                // path planning -> compute optimum_a, acceleration_time
+                let (a_optimum, t_accl) = self.plan_for_speed(speed);
 
-                let jerk = self.consider_max_jerk(MAX_JERK);
-                let optimum_a = (speed * jerk / 4.0).sqrt();
-                let max_a = self.consider_max_acceleration(optimum_a.signum() * MAX_ACCELERATION);
-                let (optimum_a, acceleration_time) = if optimum_a.abs() < max_a.abs() {
-                    // no need to accelerate at constant speed
-                    (optimum_a, 0.0)
-                } else {
-                    // need to run for a certain time at constant acceleration
-                    (max_a, speed / max_a - 4.0 * jerk / max_a)
-                };
-
-                // set the path accordingly
-                self.state[0] = RampState::AccelerateTo(optimum_a);
-                self.state[1] = RampState::AccelerateConst(acceleration_time);
-                self.state[2] = RampState::AccelerateTo(0.0);
-                self.state[3] = RampState::SpeedKeep;
+                // set the path steps (states) accordingly
+                if self.state[0] == RampState::SpeedZero {
+                    // in case a RecomputeXX is following
+                    // do not have the intermediate step of keeping the speed
+                    self.push_state_on_as_current(RampState::SpeedKeep);
+                }
+                // push states in reverse order
+                self.push_state_on_as_current(RampState::AccelerateTo(0.0));
+                self.push_state_on_as_current(RampState::AccelerateConst(t_accl));
+                self.push_state_on_as_current(RampState::AccelerateTo(a_optimum));
             }
         }
     }
@@ -403,15 +439,20 @@ impl Ramp {
         }
     }
 
-    /// In-place function that updates the state
-    ///
-    /// The ramp is defined by sequence of up to 8 steps this function is called
-    /// when a step has completed and the next step is due to be the current
-    /// Current step is the state at index zero. next is the one at index 1
+    /// Update state removes current state (path element) and let the next state
+    /// be the new current one
     fn update_state(&mut self) {
         for i in 0..(self.state.len() - 1) {
             self.state[i] = self.state[i + 1];
         }
+    }
+
+    /// Push all states one level back and add a new current state
+    fn push_state_on_as_current(&mut self, state: RampState) {
+        for i in 1..(self.state.len()) {
+            self.state[self.state.len() - i] = self.state[self.state.len() - 1 - i];
+        }
+        self.state[0] = state;
     }
 
     pub fn move_at_constant_speed(&mut self) -> Option<GeneralizedPosition> {
@@ -487,12 +528,14 @@ impl Iterator for Ramp {
             RampState::AccelerateConst(time) => self.accelerate_for_time(time),
             RampState::RecomputeToSpeed(speed) => {
                 self.set_target_speed(speed);
+                self.update_state();
                 Some(self.current)
             }
             RampState::RecomputeToPosition(original_position, target_position) => {
-                self.set_target_position(
+                self.set_target_relative_position(
                     target_position - self.current.position - original_position,
                 );
+                self.update_state();
                 Some(self.current)
             }
         }
@@ -728,5 +771,187 @@ mod tests {
         assert_eq!(r.state[0], RampState::AccelerateTo(10.0));
         assert_general_position_eq!(r.accelerate_to(2.0), s_gp!(4.0_f32, 3.0_f32, 2.0_f32));
         assert_eq!(r.state[0], RampState::SpeedKeep);
+    }
+
+    #[test]
+    fn plan_for_position_without_constraints() {
+        let rc = RampConstraints::default();
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn plan_for_position_with_speed_constraints() {
+        let rc = RampConstraints::default().max_speed(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn plan_for_position_with_acceleration_constraints() {
+        let rc = RampConstraints::default().max_acceleration(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_position(1.0), (1.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn plan_for_position_with_jerk_constraints() {
+        let rc = RampConstraints::default().max_jerk(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn plan_for_position_with_all_constraints() {
+        let rc = RampConstraints::default()
+            .max_jerk(1.0)
+            .max_acceleration(1.0)
+            .max_speed(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn plan_for_speed_without_constraints() {
+        let rc = RampConstraints::default().max_speed(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_speed(2.0), (70.0, 0.0));
+    }
+
+    #[test]
+    fn plan_for_speed_with_speed_constraints() {
+        let rc = RampConstraints::default().max_speed(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_speed(2.0), (70.0, 0.0));
+    }
+
+    #[test]
+    fn plan_for_speed_with_acceleration_constraints() {
+        let rc = RampConstraints::default().max_acceleration(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_speed(1.0), (0.5, 0.0));
+    }
+
+    #[test]
+    fn plan_for_speed_with_jerk_constraints() {
+        let rc = RampConstraints::default().max_jerk(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_speed(1.0), (0.5, 0.0));
+    }
+
+    #[test]
+    fn plan_for_speed_with_all_constraints() {
+        let rc = RampConstraints::default()
+            .max_jerk(1.0)
+            .max_acceleration(1.0)
+            .max_speed(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_eq!(r.plan_for_speed(1.0), (1.0, 0.0));
+    }
+
+    #[test]
+    fn set_target_speed_at_clean_conditions_wo_followup() {
+        let rc = RampConstraints::default();
+        let mut r = Ramp::new(1.0, rc);
+
+        r.set_target_speed(1.0);
+        // assert_eq!(r.state[0], RampState::AccelerateTo(x));
+        assert_eq!(r.state[1], RampState::AccelerateConst(0.0));
+        assert_eq!(r.state[2], RampState::AccelerateTo(0.0));
+        assert_eq!(r.state[3], RampState::SpeedKeep);
+    }
+
+    #[test]
+    fn set_target_speed_at_clean_conditions_with_followup() {
+        let rc = RampConstraints::default();
+        let mut r = Ramp::new(1.0, rc);
+
+        r.state[0] = RampState::RecomputeToPosition(1.0, 1.0);
+        r.set_target_speed(1.0);
+        assert_eq!(r.state[1], RampState::AccelerateConst(0.0));
+        assert_eq!(r.state[2], RampState::AccelerateTo(0.0));
+        assert_eq!(r.state[3], RampState::RecomputeToPosition(1.0, 1.0));
+    }
+
+    #[test]
+    fn set_target_speed_at_acceleration_conditions_wo_followup() {
+        let rc = RampConstraints::default();
+        let mut r = Ramp::new(1.0, rc);
+        r.current.acceleration = 1.0;
+
+        r.set_target_speed(1.0);
+        assert_eq!(r.state[0], RampState::AccelerateTo(0.0));
+        assert_eq!(r.state[1], RampState::RecomputeToSpeed(1.0));
+        assert_eq!(r.state[2], RampState::SpeedKeep);
+    }
+
+    #[test]
+    fn set_target_speed_at_acceleration_conditions_with_followup() {
+        let rc = RampConstraints::default();
+        let mut r = Ramp::new(1.0, rc);
+        r.current.acceleration = 1.0;
+        r.state[0] = RampState::RecomputeToPosition(1.0, 1.0);
+
+        r.set_target_speed(1.0);
+        assert_eq!(r.state[0], RampState::AccelerateTo(0.0));
+        assert_eq!(r.state[1], RampState::RecomputeToSpeed(1.0));
+        assert_eq!(r.state[2], RampState::RecomputeToPosition(1.0, 1.0));
+    }
+
+    #[test]
+    fn set_target_relative_position_at_clean_condition() {
+        let rc = RampConstraints::default();
+        let mut r = Ramp::new(1.0, rc);
+
+        r.set_target_relative_position(1.0);
+        assert_eq!(r.state[2], RampState::AccelerateTo(0.0));
+        assert_eq!(r.state[6], RampState::AccelerateTo(0.0));
+    }
+
+    #[test]
+    fn push_state_as_current_ok() {
+        let rc = RampConstraints::default();
+        let mut r = Ramp::new(1.0, rc);
+
+        r.push_state_on_as_current(RampState::SpeedKeep);
+        assert_eq!(r.state[0], RampState::SpeedKeep);
+        assert_eq!(r.state[1], RampState::SpeedZero);
+
+        r.push_state_on_as_current(RampState::AccelerateTo(1.0));
+        assert_eq!(r.state[0], RampState::AccelerateTo(1.0));
+        assert_eq!(r.state[1], RampState::SpeedKeep);
+        assert_eq!(r.state[2], RampState::SpeedZero);
+
+        r.push_state_on_as_current(RampState::SpeedConst(1.0));
+        assert_eq!(r.state[0], RampState::SpeedConst(1.0));
+        assert_eq!(r.state[1], RampState::AccelerateTo(1.0));
+        assert_eq!(r.state[2], RampState::SpeedKeep);
+        assert_eq!(r.state[3], RampState::SpeedZero);
+    }
+
+    #[test]
+    fn set_target_relative_position_recompute_conditions() {
+        let rc = RampConstraints::default();
+        let mut r = Ramp::new(1.0, rc);
+
+        r.current.acceleration = 1.0;
+        r.set_target_relative_position(1.0);
+        assert_eq!(r.state[0], RampState::RecomputeToSpeed(0.0));
+        assert_eq!(r.state[1], RampState::RecomputeToPosition(0.0, 1.0));
+        assert_eq!(r.state[2], RampState::SpeedZero);
+
+        r.current.acceleration = 0.0;
+        r.current.speed = 1.0;
+        r.set_target_relative_position(1.0);
+        assert_eq!(r.state[0], RampState::RecomputeToSpeed(0.0));
+        assert_eq!(r.state[1], RampState::RecomputeToPosition(0.0, 1.0));
+        assert_eq!(r.state[2], RampState::SpeedZero);
+
+        r.current.acceleration = 1.0;
+        r.current.speed = 1.0;
+        r.set_target_relative_position(1.0);
+        assert_eq!(r.state[0], RampState::RecomputeToSpeed(0.0));
+        assert_eq!(r.state[1], RampState::RecomputeToPosition(0.0, 1.0));
+        assert_eq!(r.state[2], RampState::SpeedZero);
     }
 }
