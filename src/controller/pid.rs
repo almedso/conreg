@@ -272,15 +272,34 @@ mod tests {
     use super::*;
     use float_cmp::approx_eq;
 
-    macro_rules! assert_float_tuple3_eq {
-        ($left:expr, $right:expr) => {
-            if ! approx_eq!(f32, $left.0, $right.0, epsilon = 0.001)
-            || ! approx_eq!(f32, $left.1, $right.1, epsilon = 0.001)
-            || ! approx_eq!(f32, $left.2, $right.2, epsilon = 0.001) {
-                panic!("assertion failed, different generalized positions:\n  left:  {:?}\n  right: {:?}", $left, $right);
+    macro_rules! assert_float_b_coeff_eq {
+        ($a: expr, $b:expr, $epsilon: expr) => {
+            if !approx_eq!(f32, $a.0, $b.0, epsilon = $epsilon)
+                || !approx_eq!(f32, $a.1, $b.1, epsilon = $epsilon)
+                || !approx_eq!(f32, $a.2, $b.2, epsilon = $epsilon)
+            {
+                panic!("assertion failed\n  left:  {:?}\n  right: {:?}", $a, $b);
             }
-        }
+        };
     }
+
+    macro_rules! approx_int_eq {
+        ($a: expr, $b:expr, $epsilon: expr) => {
+            (($a - $b).abs() <= $epsilon)
+        };
+    }
+
+    macro_rules! assert_int_b_coeff_eq {
+        ($a: expr, $b:expr, $epsilon: expr) => {
+            if !approx_int_eq!($a.0, $b.0, $epsilon)
+                || !approx_int_eq!($a.1, $b.1, $epsilon)
+                || !approx_int_eq!($a.2, $b.2, $epsilon)
+            {
+                panic!("assertion failed\n  left:  {:?}\n  right: {:?}", $a, $b);
+            }
+        };
+    }
+
     #[test]
     fn init_pid_ok() {
         let p = PidParameterAdditive {
@@ -290,10 +309,10 @@ mod tests {
         };
         let pid = PidController::<f32>::new(0.000_05).set(p);
         assert_eq!(pid.a, (0.0, 1.0));
-        assert_eq!(pid.b, (3.8, 0.4, 0.8));
+        assert_float_b_coeff_eq!(pid.b, (80_000.0, -160_000.0, 80_000.0), 2.0);
         let pid = PidController::<i32>::new(0.000_05).set(p);
         assert_eq!(pid.a, (0, 1000));
-        assert_eq!(pid.b, (3800, 400, 800));
+        assert_int_b_coeff_eq!(pid.b, (80_000_000, -160_000_000, 80_000_000), 2_000);
     }
 
     #[test]
@@ -303,19 +322,20 @@ mod tests {
             integral: 1.0,
             differential: 4.0,
         };
-        let pid = PidController::<f32>::new_with_t1(0.000_05, 0.000_05).set(p);
-        assert_eq!(pid.a, (0.0, 1.0));
-        assert_eq!(pid.b, (3.8, 0.4, 0.8));
+        let pid = PidController::<f32>::new_with_t1(0.01, 0.1).set(p);
+        assert_eq!(pid.a, (-0.9, 1.9));
+        assert_float_b_coeff_eq!(pid.b, (39.8, -79.8, 40.0), 0.001);
+
         let pid = PidController::<i32>::new_with_t1(0.000_05, 0.000_05).set(p);
         assert_eq!(pid.a, (0, 1000));
-        assert_eq!(pid.b, (3800, 400, 800));
+        assert_int_b_coeff_eq!(pid.b, (79_998_000, -159_998_000, 80_000_000), 10_000);
 
         let pid = PidController::<f32>::new_with_t1(0.000_05, 0.000_5).set(p);
         assert_eq!(pid.a, (-0.9, 1.9));
-        assert_float_tuple3_eq!(pid.b, (0.38, 0.04, 0.08));
+        assert_float_b_coeff_eq!(pid.b, (8000.0, -16_000.0, 8000.0), 1.0);
         let pid = PidController::<i32>::new_with_t1(0.000_05, 0.000_5).set(p);
         assert_eq!(pid.a, (-900, 1900));
-        assert_eq!(pid.b, (380, 40, 80));
+        assert_int_b_coeff_eq!(pid.b, (8_000_000, -16_000_000, 8_000_000), 1_000);
     }
 
     #[test]
@@ -411,12 +431,12 @@ mod tests {
     #[test]
     fn control_oni32_ok() {
         let p = PidParameterAdditive::new(0.5).set_differential(0.5);
-        let mut pid = PidController::<i32>::new(0.000_01).set(p);
+        let mut pid = PidController::<i32>::new(0.001).set(p);
         // double check the parameters
-        assert_eq!(pid.b, (0, -500, 500));
+        assert_int_b_coeff_eq!(pid.b, (500_000, -1_000_000, 500_000), 1000);
         // model the step response input to see the controller in action
         assert_eq!(pid.control((0, 0)), 0);
-        assert_eq!(pid.control((1000, 0)), 500);
+        assert_eq!(pid.control((1000, 0)), 500_000);
         assert_eq!(pid.control((1000, 0)), 500);
         assert_eq!(pid.control((1000, 0)), 500);
     }
@@ -426,10 +446,10 @@ mod tests {
         let p = PidParameterAdditive::new(0.5).set_differential(0.5);
         let mut pid = PidController::<f32>::new(0.000_01).set(p);
         // double check the parameters
-        assert_eq!(pid.b, (0.0, -0.5, 0.5));
+        assert_float_b_coeff_eq!(pid.b, (50_000.0, -100_000.0, 50_000.0), 1.0);
         // model the step response input to see the controller in action
         assert_eq!(pid.control((0.0, 0.0)), 0.0);
-        assert_eq!(pid.control((1.0, 0.0)), 0.5);
+        assert_eq!(pid.control((1.0, 0.0)), 50_000.0);
         assert_eq!(pid.control((1.0, 0.0)), 0.5);
     }
 }

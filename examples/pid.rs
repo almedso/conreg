@@ -16,7 +16,7 @@ fn main() {
     println!("PidController: {:?}", pid);
 
     let manipulated = manipulated.map(|x| pid.control(x));
-    let mut count = 100_i32;
+    // let mut count = 100_i32;
     // let manipulated = manipulated.filter(|_x| {
     //     count -= 1;
     //     if count == 0 {
