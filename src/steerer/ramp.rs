@@ -191,8 +191,8 @@ pub struct Ramp {
 
 // Arbitrary constant e.g. for utmost upper limits
 const TIME_UNIT: f32 = 1.0; // time unit of 1 second - just for readability
-const MAX_JERK: f32 = 9810.0; // that is about 100g / sec
-const MAX_ACCELERATION: f32 = 981.0; // that is about 10g
+const MAX_JERK: f32 = 1000_000.0; // that is more than  100_000 g / sec
+const MAX_ACCELERATION: f32 = 100_000.0; // that is more than 10_000 g
 const MAX_SPEED: f32 = 300_000_000.0; // about light speed in m per sec
 
 impl Ramp {
@@ -219,6 +219,56 @@ impl Ramp {
         self.state = [RampState::SpeedZero; 8];
     }
 
+    /// Analyse mandatory step of acceleration changes to determine
+    ///
+    /// * acceleration to end up (a_opt)
+    /// * and new delta_position to move to reduced by the (signed) distance
+    ///   spend while changing acceleration
+    ///
+    /// At this step the formula holds: the da/dt = jerk is constant.
+    /// jerk is equal the jerk limit.
+    ///
+    /// It is assured that the the (potential) acceleration limit is not
+    /// exceeded.
+    ///
+    /// It is assured that the resulting acceleration will not end up
+    /// a speed that exceeds the speed limit.
+    ///
+    /// # Returns
+    ///
+    /// tuple (a_opt, delta_position )
+    /// note about the returned tuple:
+    ///    delta_position.abs() >= delta_position.return.abs() >= 0.0
+    ///    delta_poosiiton.signum() == a_opt.signum()
+    ///
+    fn compute_parameters_of_acceleration_change_steps(&self, delta_position: f32) -> (f32, f32) {
+        let jerk = self.consider_max_jerk(MAX_JERK);
+        // 4 times unconstraint jerked acceleration to a_opt
+        // s = j^3 / 3 * t^3 and a_opt =  j * t
+        let mut a_opt = (12.0 * jerk.powi(2) * delta_position.abs()).cbrt();
+
+        let a_max_by_accl = self.consider_max_acceleration(MAX_ACCELERATION);
+        if a_opt > a_max_by_accl {
+            // reduce max acceleration due to acceleration limit
+            a_opt = a_max_by_accl;
+        }
+
+        let v_max = self.consider_max_speed(MAX_SPEED);
+        // we accelerate and decelerate so it is TWO times:  2.0 / TWO = 1.0
+        let a_max_by_speed = (v_max * jerk).sqrt();
+        if a_opt > a_max_by_speed {
+            // reduce max acceleration due to speed limit
+            a_opt = a_max_by_speed;
+        };
+        a_opt *= delta_position.signum();
+        (
+            // resulting optimal acceleration (with sign)
+            a_opt,
+            // signed distance to move without changing acceleration portions
+            delta_position - a_opt.powi(3) / (12.0 * jerk.powi(2)),
+        )
+    }
+
     // Internal function that plans
     //  * path acceleration (a_opt),
     //  * constant acceleration time (t_accl)
@@ -226,50 +276,32 @@ impl Ramp {
     // under the condition that the prerequisites are met
     // (speed zero, acceleration zero of current generalized position)
     fn plan_for_position(&self, delta_position: f32) -> (f32, f32, f32) {
-        let mut d_p = delta_position;
-        let jerk = self.consider_max_jerk(MAX_JERK);
-        // preliminary acceleration determined by distance to move
-        let mut a_opt = (d_p / (12.0 * jerk.powi(2))).cbrt();
-        let a_max = self.consider_max_acceleration(a_opt.signum() * MAX_ACCELERATION);
-        let v_max = self.consider_max_speed(a_opt.signum() * MAX_SPEED);
-        let a_max_by_speed = (v_max * 2.0 * jerk).sqrt();
+        let (a_opt, delta_position) =
+            self.compute_parameters_of_acceleration_change_steps(delta_position);
 
-        // correct a_opt;  compute remaining distance (reduced by jerked acceleration)
-        let a_super_max = if a_max_by_speed > a_max {
-            // reduce max acceleration due to acceleration limit
-            a_max
-        } else {
-            // reduce max acceleration due to speed limit
-            a_max_by_speed
-        };
-        if a_opt.abs() < a_super_max.abs() {
-            // a_opt is now finally determined
-            a_opt = a_super_max * a_opt.signum();
-            d_p -= 4.0 * a_opt.powi(3) / (3.0 * jerk.powi(2));
-        }
-
-        // from here we check how to balance between const acceleration and
-        // const speed movement: input is v_res, a_opt, d_p
         // a_opt is below  acceleration limits, v_res is below speed limit
         // we have a distance of d_p go move
+        let jerk = self.consider_max_jerk(MAX_JERK);
+        let v_max = self.consider_max_speed(MAX_SPEED);
         let t_v: f32;
         let t_accl: f32;
-        let v_res = a_opt.powi(2) / (2.0 * jerk);
-        // the maximum distance achieved without moving at const speed
-        // i.e. accelerate to speed limit
-        let s_accl_max = (v_max - v_res).powi(2) / a_opt;
-        if s_accl_max > d_p {
-            // no need to move at const speed
-            t_accl = (d_p / a_opt).sqrt();
+        // speed gain v_res achieved by TWO accelerate change steps
+        let v_res = a_opt.powi(2) / jerk;
+        // s_accl is the distance is potentially moved at constant acceleration
+        // this step happens TWO times
+        let s_accl = (v_max - v_res).powi(2) / a_opt.abs();
+        if s_accl >= delta_position.abs() {
+            // no need to move at const speed; accelerate 2 times
+            t_accl = (delta_position / a_opt).abs().sqrt();
             t_v = 0.0;
         } else {
             // accelerate up to v_max and move the remaining distance at const speed
-            t_accl = (v_max - v_res) * a_opt;
-            d_p -= a_opt * t_accl.powi(2);
-            t_v = d_p / v_max;
+            t_accl = (v_max - v_res) * a_opt.abs();
+            t_v = (delta_position - a_opt * t_accl.powi(2)).abs() / v_max;
         }
         (a_opt, t_accl, t_v)
     }
+
     /// Set position mode - perform movement path planning
     ///
     /// Move a certain (signed) distance (relative position) and stop.
@@ -321,15 +353,19 @@ impl Ramp {
     // Plan optimal acceleration (a_optimal) and time to accelerate (t_accl) to reach target speed
     // Returns (a_optimal, t_accl) tupel
     fn plan_for_speed(&self, speed: f32) -> (f32, f32) {
+        let speed = self.consider_max_speed(speed) - self.current.speed;
         let jerk = self.consider_max_jerk(MAX_JERK);
-        let a_optimum = (speed * jerk / 4.0).sqrt();
-        let a_max = self.consider_max_acceleration(a_optimum.signum() * MAX_ACCELERATION);
-        if a_optimum.abs() < a_max.abs() {
+        let a_optimum = (speed * jerk / 4.0).abs().sqrt(); // a is with out sign so far
+        let a_max = self.consider_max_acceleration(a_optimum * MAX_ACCELERATION);
+        if a_optimum < a_max.abs() {
             // no need to accelerate at constant acceleration
-            (a_optimum, 0.0)
+            (a_optimum * speed.signum(), 0.0)
         } else {
             // need to run for a certain time at constant acceleration
-            (a_max, speed / a_max - 4.0 * jerk / a_max)
+            (
+                a_max * speed.signum(),
+                speed.abs() / a_max - 4.0 * a_max / jerk,
+            )
         }
     }
     /// Set speed mode - perform movement path planning
@@ -364,7 +400,6 @@ impl Ramp {
             self.push_state_on_as_current(RampState::RecomputeToSpeed(speed));
             self.push_state_on_as_current(RampState::AccelerateTo(0.0));
         } else {
-            let speed = self.consider_max_speed(speed);
             if speed == self.current.speed {
                 if self.state[0] == RampState::SpeedZero {
                     // in case a RecomputeXX is following
@@ -773,32 +808,128 @@ mod tests {
         assert_eq!(r.state[0], RampState::SpeedKeep);
     }
 
+    macro_rules! assert_float_2tuple_eq {
+        ($a: expr, $b:expr, $epsilon: expr) => {
+            if !approx_eq!(f32, $a.0, $b.0, epsilon = $epsilon)
+                || !approx_eq!(f32, $a.1, $b.1, epsilon = $epsilon)
+            {
+                panic!("assertion failed\n  left:  {:?}\n  right: {:?}", $a, $b);
+            }
+        };
+    }
+
+    macro_rules! assert_float_3tuple_eq {
+        ($a: expr, $b:expr, $epsilon: expr) => {
+            if !approx_eq!(f32, $a.0, $b.0, epsilon = $epsilon)
+                || !approx_eq!(f32, $a.1, $b.1, epsilon = $epsilon)
+                || !approx_eq!(f32, $a.2, $b.2, epsilon = $epsilon)
+            {
+                panic!("assertion failed\n  left:  {:?}\n  right: {:?}", $a, $b);
+            }
+        };
+    }
+
+    #[test]
+    fn try_test() {
+        let mut a = -22894.0_f32;
+        assert_eq!(a.signum(), -1.0);
+        assert_eq!((a * -1.0).signum(), 1.0);
+    }
+
+    #[test]
+    fn compute_parameters_of_acceleration_change_steps_without_constraints() {
+        let rc = RampConstraints::default();
+        let r = Ramp::new(1.0, rc);
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(1.0),
+            (22894.285, 0.0),
+            0.001
+        );
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(-1.0),
+            (-22894.2850, 0.0),
+            0.001
+        );
+    }
+
+    #[test]
+    fn compute_parameters_of_acceleration_change_steps_with_speed_constraints() {
+        let rc = RampConstraints::default().max_speed(0.01);
+        let r = Ramp::new(1.0, rc);
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(10.0),
+            (100.0, 10.0),
+            0.001
+        );
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(-10.0),
+            (-100.0, -10.0),
+            0.001
+        );
+    }
+
+    #[test]
+    fn compute_parameters_of_acceleration_change_steps_with_acceleration_constraints() {
+        let rc = RampConstraints::default().max_acceleration(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(1.0),
+            (1.0, 1.0),
+            0.001
+        );
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(-1.0),
+            (-1.0, -1.0),
+            0.001
+        );
+    }
+
+    #[test]
+    fn compute_parameters_of_acceleration_change_steps_with_jerk_constraints() {
+        let rc = RampConstraints::default().max_jerk(1.0);
+        let r = Ramp::new(1.0, rc);
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(1.0),
+            (2.290, 0.0),
+            0.001
+        );
+        assert_float_2tuple_eq!(
+            r.compute_parameters_of_acceleration_change_steps(-1.0),
+            (-2.290, 0.0),
+            0.001
+        );
+    }
+
     #[test]
     fn plan_for_position_without_constraints() {
         let rc = RampConstraints::default();
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
+        assert_float_3tuple_eq!(r.plan_for_position(1.0), (22894.285, 0.0, 0.0), 0.001);
+        assert_float_3tuple_eq!(r.plan_for_position(-1.0), (-22894.285, 0.0, 0.0), 0.001);
     }
 
     #[test]
     fn plan_for_position_with_speed_constraints() {
-        let rc = RampConstraints::default().max_speed(1.0);
+        let rc = RampConstraints::default().max_speed(0.01);
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
+        assert_float_3tuple_eq!(r.plan_for_position(10.0), (100.0, 0.0, 1000.0), 0.001);
+        assert_float_3tuple_eq!(r.plan_for_position(-10.0), (-100.0, 0.0, 1000.0), 0.001);
     }
 
     #[test]
     fn plan_for_position_with_acceleration_constraints() {
         let rc = RampConstraints::default().max_acceleration(1.0);
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_position(1.0), (1.0, 1.0, 0.0));
+        assert_float_3tuple_eq!(r.plan_for_position(10.0), (1.0, 3.162, 0.0), 0.001);
+        assert_float_3tuple_eq!(r.plan_for_position(-10.0), (-1.0, 3.162, 0.0), 0.001);
     }
 
     #[test]
     fn plan_for_position_with_jerk_constraints() {
-        let rc = RampConstraints::default().max_jerk(1.0);
+        let rc = RampConstraints::default().max_jerk(0.1);
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
+        assert_float_3tuple_eq!(r.plan_for_position(1.0), (0.493, 0.0, 0.0), 0.001);
+        assert_float_3tuple_eq!(r.plan_for_position(-1.0), (-0.493, 0.0, 0.0), 0.001);
     }
 
     #[test]
@@ -806,37 +937,43 @@ mod tests {
         let rc = RampConstraints::default()
             .max_jerk(1.0)
             .max_acceleration(1.0)
-            .max_speed(1.0);
+            .max_speed(10.0);
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_position(1.0), (1.0, 0.0, 0.0));
-    }
+        assert_float_3tuple_eq!(r.plan_for_position(100.0), (1.0, 9.0, 1.891), 0.001);
+        assert_float_3tuple_eq!(r.plan_for_position(-100.0), (-1.0, 9.0, 1.891), 0.001);
+        }
 
     #[test]
     fn plan_for_speed_without_constraints() {
-        let rc = RampConstraints::default().max_speed(1.0);
+        let rc = RampConstraints::default();
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_speed(2.0), (70.0, 0.0));
+        assert_float_2tuple_eq!(r.plan_for_speed(10.0), (1581.1, 0.0), 0.1);
     }
 
     #[test]
     fn plan_for_speed_with_speed_constraints() {
         let rc = RampConstraints::default().max_speed(1.0);
-        let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_speed(2.0), (70.0, 0.0));
+        let mut r = Ramp::new(1.0, rc);
+        assert_float_2tuple_eq!(r.plan_for_speed(10.0), (500.0, 0.0), 0.2);
+        assert_float_2tuple_eq!(r.plan_for_speed(-10.0), (-500.0, 0.0), 0.2);
+        r.current.speed = 2.0;
+        assert_float_2tuple_eq!(r.plan_for_speed(10.0), (-500.0, 0.0), 0.2);
     }
 
     #[test]
     fn plan_for_speed_with_acceleration_constraints() {
         let rc = RampConstraints::default().max_acceleration(1.0);
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_speed(1.0), (0.5, 0.0));
+        assert_float_2tuple_eq!(r.plan_for_speed(10.0), (1.0, 10.0), 0.1);
+        assert_float_2tuple_eq!(r.plan_for_speed(-10.0), (-1.0, 10.0), 0.1);
     }
 
     #[test]
     fn plan_for_speed_with_jerk_constraints() {
         let rc = RampConstraints::default().max_jerk(1.0);
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_speed(1.0), (0.5, 0.0));
+        assert_float_2tuple_eq!(r.plan_for_speed(10.0), (1.58, 0.0), 0.1);
+        assert_float_2tuple_eq!(r.plan_for_speed(-10.0), (-1.58, 0.0), 0.1);
     }
 
     #[test]
@@ -844,9 +981,9 @@ mod tests {
         let rc = RampConstraints::default()
             .max_jerk(1.0)
             .max_acceleration(1.0)
-            .max_speed(1.0);
+            .max_speed(100.0);
         let r = Ramp::new(1.0, rc);
-        assert_eq!(r.plan_for_speed(1.0), (1.0, 0.0));
+        assert_float_2tuple_eq!(r.plan_for_speed(10.0), (1.0, 6.0), 0.1);
     }
 
     #[test]
