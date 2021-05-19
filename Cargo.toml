@@ -1,17 +1,22 @@
 [package]
-name = "steer-and-control"
+name = "conreg"
 version = "0.1.0"
 authors = ["Volker Kempert <volker.kempert@almedso.de>"]
 edition = "2018"
-description = "Actuators and Sensors"
-documentation = "https://docs.rs/sensact"
-homepage = "https://github.com/almedso/sensact"
+description = "Control and Regulation"
+documentation = "https://docs.rs/conreg"
+homepage = "https://github.com/almedso/conreg"
 keywords = ["measurement", "actuator"]
 categories = ["no-std"]
-license = "MIT"
-repository = "https://github.com/almedso/sensact"
+license = "ISC"
+repository = "https://github.com/almedso/conreg"
 readme = "README.md"
-
+include = [
+    "**/*.rs",
+    "Cargo.toml",
+    "README.md",
+    "License.md",
+]
 [dependencies]
 libm = { version = "0.2.0", optional = true }
 rand = { version = "0.7.3" }

@@ -1,5 +1,5 @@
+use conreg::regulation::ramp::{Ramp, RampConstraints};
 use core::default::Default;
-use steer_and_control::steerer::ramp::{Ramp, RampConstraints};
 
 fn main() {
     let rc: RampConstraints = Default::default();

@@ -31,8 +31,8 @@
 //!
 //! ```rust
 //! use std::iter;
-//! use steer_and_control::controller::pid::PidController;
-//! use steer_and_control::controller::pid_parameter::{PidParameterAdditive};
+//! use conreg::control::pid::PidController;
+//! use conreg::control::pid_parameter::{PidParameterAdditive};
 //!
 //! let mut actual = iter::repeat(0.0_f32); // This is what we measure
 //! // This composes a step response input as target, i.e. what we want
@@ -62,8 +62,8 @@
 //!
 //! ```ignore
 //! use std::iter;
-//! use steer_and_control::controller::pid::PidController;
-//! use steer_and_control::controller::pid_parameter::{PidParameterAdditive};
+//! use conreg::control::pid::PidController;
+//! use conreg::control::pid_parameter::{PidParameterAdditive};
 //!
 //! // Sensor that measures actual value - implements an iterator
 //! let process = Sensor::new(); // does not compile

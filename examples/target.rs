@@ -14,7 +14,7 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-use steer_and_control::target::*;
+use conreg::target::*;
 
 const HALF_A_SEC: Duration = Duration::from_millis(500);
 const ONE_SEC: Duration = Duration::from_millis(1000);

@@ -1,4 +1,4 @@
-//! Controllers
+//! Control
 //!
 //! Controllers control some real hardware by incorporating a feedback delivered
 //! by a sensor.

@@ -22,7 +22,7 @@ const OUTDATED_TIME_DIFFERENCE_IN_MICROSECONDS: usize = 1_000_000; // one second
 /// ## Examples
 ///
 /// ```rust
-/// use steer_and_control::timebase::TimeDelta;
+/// use conreg::timebase::TimeDelta;
 ///
 /// let mut e1 = TimeDelta::default();
 /// let mut e2 = TimeDelta::default();

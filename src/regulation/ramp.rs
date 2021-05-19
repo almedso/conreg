@@ -52,7 +52,7 @@
 //! ### Example
 //!
 //! ```rust
-//! use steer_and_control::steerer::ramp::{Ramp, RampConstraints};
+//! use conreg::regulation::ramp::{Ramp, RampConstraints};
 //!
 //! let rc = RampConstraints::default().max_speed(1.0);
 //! println!("{:?}", rc);
@@ -74,7 +74,7 @@
 //! ### Example
 //!
 //! ```rust
-//! use steer_and_control::steerer::ramp::{Ramp, RampConstraints};
+//! use conreg::regulation::ramp::{Ramp, RampConstraints};
 //!
 //! let rc =  RampConstraints::default().max_acceleration(1.0);
 //! println!("{:?}", rc);
@@ -239,16 +239,16 @@ impl Ramp {
     /// tuple (a_opt, delta_position )
     /// note about the returned tuple:
     ///    delta_position.abs() >= delta_position.return.abs() >= 0.0
-    ///    delta_poosiiton.signum() == a_opt.signum()
+    ///    delta_poosition.signum() == a_opt.signum()
     ///
     fn compute_parameters_of_acceleration_change_steps(&self, delta_position: f32) -> (f32, f32) {
         let jerk = self.consider_max_jerk(MAX_JERK);
-        // 4 times unconstraint jerked acceleration to a_opt
+        // 4 times unconstrained jerked acceleration to a_opt
         // s1 = j^3 / 3 * t^3 and a_opt =  j * t
-        // optimal decelration at the end
+        // optimal deceleration at the end
         // s2 = j^3 / 3 * t^3 + v_end * t and v_end = j / 2 t^2
         // delta_position = 2 * (s1 + s2)
-        // assumption here v_end is  without continous acceleration step
+        // assumption here v_end is  without continuous acceleration step
         let mut a_opt = ((1.0 / 2.0) * jerk.powi(2) * delta_position.abs()).cbrt();
 
         let a_max_by_accl = self.consider_max_acceleration(MAX_ACCELERATION);
@@ -259,7 +259,7 @@ impl Ramp {
 
         let v_max = self.consider_max_speed(MAX_SPEED);
         // we accelerate and decelerate so it is TWO times:  2.0 / TWO = 1.0
-        // and use the forumla v_end = 2 * a_end * t
+        // and use the formula v_end = 2 * a_end * t
         let a_max_by_speed = (v_max * jerk).sqrt();
         if a_opt > a_max_by_speed {
             // reduce max acceleration due to speed limit
@@ -343,7 +343,7 @@ impl Ramp {
     /// * `delta_position`: The target position equals current position + (signed) delta position.
     pub fn set_target_relative_position(&mut self, delta_position: f32) {
         if self.current.acceleration != 0.0 || self.current.speed != 0.0 {
-            // planning conditions are not given -> go to zero acceleration, zero speed and start over
+            // planning conditions are not given; go to zero acceleration, zero speed and start over
             // remember current position for later reconsideration
             self.reset_path_states();
             self.state[0] = RampState::RecomputeToSpeed(0.0);

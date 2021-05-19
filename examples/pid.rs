@@ -1,6 +1,6 @@
+use conreg::control::pid::PidController;
+use conreg::control::pid_parameter::PidParameterAdditive;
 use std::iter;
-use steer_and_control::controller::pid::PidController;
-use steer_and_control::controller::pid_parameter::{PidParameterAdditive, PidParameterStandard};
 
 fn main() {
     let step_pre = iter::repeat(0.0_f32).take(5);
